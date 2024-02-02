@@ -9,16 +9,16 @@
 
 'use strict';
 
-import {normalizeCodeLocInfo} from './utils';
+import {
+  getLegacyRenderImplementation,
+  getModernRenderImplementation,
+  normalizeCodeLocInfo,
+} from './utils';
 
 describe('Timeline profiler', () => {
   let React;
-  let ReactDOMClient;
   let Scheduler;
-  let renderHelper;
-  let renderRootHelper;
   let store;
-  let unmountFns;
   let utils;
   let waitFor;
   let waitForAll;
@@ -29,23 +29,7 @@ describe('Timeline profiler', () => {
     utils = require('./utils');
     utils.beforeEachProfiling();
 
-    unmountFns = [];
-    renderHelper = element => {
-      const unmountFn = utils.legacyRender(element);
-      unmountFns.push(unmountFn);
-      return unmountFn;
-    };
-    renderRootHelper = element => {
-      const container = document.createElement('div');
-      const root = ReactDOMClient.createRoot(container);
-      root.render(element);
-      const unmountFn = () => root.unmount();
-      unmountFns.push(unmountFn);
-      return unmountFn;
-    };
-
     React = require('react');
-    ReactDOMClient = require('react-dom/client');
     Scheduler = require('scheduler');
 
     const InternalTestUtils = require('internal-test-utils');
@@ -135,13 +119,15 @@ describe('Timeline profiler', () => {
       // Verify all logged marks also get cleared.
       expect(marks).toHaveLength(0);
 
-      unmountFns.forEach(unmountFn => unmountFn());
-
       setPerformanceMock(null);
     });
 
+    const {render: legacyRender} = getLegacyRenderImplementation();
+    const {render: modernRender} = getModernRenderImplementation();
+
+    // @reactVersion < 19
     it('should mark sync render without suspends or state updates', () => {
-      renderHelper(<div />);
+      legacyRender(<div />);
 
       expect(clearedMarks).toMatchInlineSnapshot(`
         [
@@ -162,7 +148,7 @@ describe('Timeline profiler', () => {
     });
 
     it('should mark concurrent render without suspends or state updates', async () => {
-      renderRootHelper(<div />);
+      modernRender(<div />);
 
       expect(clearedMarks).toMatchInlineSnapshot(`
         [
@@ -203,7 +189,7 @@ describe('Timeline profiler', () => {
       }
 
       React.startTransition(() => {
-        renderRootHelper(<Foo />);
+        modernRender(<Foo />);
       });
 
       await waitFor(['Foo']);
@@ -225,7 +211,7 @@ describe('Timeline profiler', () => {
         throw fakeSuspensePromise;
       }
 
-      renderHelper(
+      legacyRender(
         <React.Suspense fallback={null}>
           <Example />
         </React.Suspense>,
@@ -261,13 +247,14 @@ describe('Timeline profiler', () => {
           `);
     });
 
+    // @reactVersion < 19
     it('should mark sync render with suspense that rejects', async () => {
       const fakeSuspensePromise = Promise.reject(new Error('error'));
       function Example() {
         throw fakeSuspensePromise;
       }
 
-      renderHelper(
+      legacyRender(
         <React.Suspense fallback={null}>
           <Example />
         </React.Suspense>,
@@ -309,7 +296,7 @@ describe('Timeline profiler', () => {
         throw fakeSuspensePromise;
       }
 
-      renderRootHelper(
+      modernRender(
         <React.Suspense fallback={null}>
           <Example />
         </React.Suspense>,
@@ -364,7 +351,7 @@ describe('Timeline profiler', () => {
         throw fakeSuspensePromise;
       }
 
-      renderRootHelper(
+      modernRender(
         <React.Suspense fallback={null}>
           <Example />
         </React.Suspense>,
@@ -423,7 +410,7 @@ describe('Timeline profiler', () => {
         }
       }
 
-      renderRootHelper(<Example />);
+      modernRender(<Example />);
 
       expect(clearedMarks).toMatchInlineSnapshot(`
         [
@@ -476,7 +463,7 @@ describe('Timeline profiler', () => {
         }
       }
 
-      renderRootHelper(<Example />);
+      modernRender(<Example />);
 
       expect(clearedMarks).toMatchInlineSnapshot(`
         [
@@ -530,7 +517,7 @@ describe('Timeline profiler', () => {
         }
       }
 
-      renderRootHelper(<Example />);
+      modernRender(<Example />);
 
       expect(clearedMarks).toMatchInlineSnapshot(`
         [
@@ -584,7 +571,7 @@ describe('Timeline profiler', () => {
         }
       }
 
-      renderRootHelper(<Example />);
+      modernRender(<Example />);
 
       expect(clearedMarks).toMatchInlineSnapshot(`
         [
@@ -635,7 +622,7 @@ describe('Timeline profiler', () => {
         return didMount;
       }
 
-      renderRootHelper(<Example />);
+      modernRender(<Example />);
 
       expect(clearedMarks).toMatchInlineSnapshot(`
         [
@@ -689,7 +676,7 @@ describe('Timeline profiler', () => {
         return didMount;
       }
 
-      renderRootHelper(<Example />);
+      modernRender(<Example />);
 
       await waitForAll([]);
 
@@ -738,7 +725,7 @@ describe('Timeline profiler', () => {
         return didRender;
       }
 
-      renderRootHelper(<Example />);
+      modernRender(<Example />);
 
       await waitForAll([]);
 
@@ -763,6 +750,7 @@ describe('Timeline profiler', () => {
       `);
     });
 
+    // @reactVersion < 19
     it('should mark sync render that throws', async () => {
       jest.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -783,7 +771,7 @@ describe('Timeline profiler', () => {
         throw Error('Expected error');
       }
 
-      renderHelper(
+      legacyRender(
         <ErrorBoundary>
           <ExampleThatThrows />
         </ErrorBoundary>,
@@ -846,7 +834,7 @@ describe('Timeline profiler', () => {
         throw 'Expected error';
       }
 
-      renderRootHelper(
+      modernRender(
         <ErrorBoundary>
           <ExampleThatThrows />
         </ErrorBoundary>,
@@ -945,7 +933,7 @@ describe('Timeline profiler', () => {
         return null;
       }
 
-      const unmount = renderRootHelper(<ComponentWithEffects />);
+      const unmount = modernRender(<ComponentWithEffects />);
 
       await waitForPaint(['layout 1 mount', 'layout 2 mount']);
 
@@ -1038,8 +1026,9 @@ describe('Timeline profiler', () => {
     });
 
     describe('lane labels', () => {
+      // @reactVersion < 19
       it('regression test SyncLane', () => {
-        renderHelper(<div />);
+        legacyRender(<div />);
 
         expect(clearedMarks).toMatchInlineSnapshot(`
           [
@@ -1060,7 +1049,7 @@ describe('Timeline profiler', () => {
       });
 
       it('regression test DefaultLane', () => {
-        renderRootHelper(<div />);
+        modernRender(<div />);
         expect(clearedMarks).toMatchInlineSnapshot(`
           [
             "--schedule-render-32",
@@ -1079,7 +1068,7 @@ describe('Timeline profiler', () => {
           return <button ref={targetRef} onClick={handleClick} />;
         }
 
-        renderRootHelper(<App />);
+        modernRender(<App />);
         await waitForAll([]);
 
         clearedMarks.splice(0);
@@ -1118,7 +1107,7 @@ describe('Timeline profiler', () => {
           return <div ref={targetRef} onMouseOver={handleMouseOver} />;
         }
 
-        renderRootHelper(<App />);
+        modernRender(<App />);
         await waitForAll([]);
 
         clearedMarks.splice(0);
@@ -1196,17 +1185,17 @@ describe('Timeline profiler', () => {
       };
     });
 
-    afterEach(() => {
-      unmountFns.forEach(unmountFn => unmountFn());
-    });
-
     describe('when profiling', () => {
+      const {render: legacyRender} = getLegacyRenderImplementation();
+      const {render: modernRender} = getModernRenderImplementation();
+
       beforeEach(() => {
         utils.act(() => store.profilerStore.startProfiling());
       });
 
+      // @reactVersion < 19
       it('should mark sync render without suspends or state updates', () => {
-        renderHelper(<div />);
+        legacyRender(<div />);
 
         const timelineData = stopProfilingAndGetTimelineData();
         expect(timelineData.schedulingEvents).toMatchInlineSnapshot(`
@@ -1222,7 +1211,7 @@ describe('Timeline profiler', () => {
       });
 
       it('should mark concurrent render without suspends or state updates', () => {
-        utils.act(() => renderRootHelper(<div />));
+        utils.act(() => modernRender(<div />));
 
         const timelineData = stopProfilingAndGetTimelineData();
         expect(timelineData.schedulingEvents).toMatchInlineSnapshot(`
@@ -1256,7 +1245,7 @@ describe('Timeline profiler', () => {
           return null;
         }
 
-        utils.act(() => renderRootHelper(<Example />));
+        utils.act(() => modernRender(<Example />));
         utils.act(() => store.profilerStore.stopProfiling());
         utils.act(() => store.profilerStore.startProfiling());
         utils.act(updaterFn);
@@ -1318,7 +1307,7 @@ describe('Timeline profiler', () => {
         }
 
         React.startTransition(() => {
-          renderRootHelper(<Foo />);
+          modernRender(<Foo />);
         });
 
         // Do one step of work.
@@ -1333,6 +1322,7 @@ describe('Timeline profiler', () => {
         expect(batch.filter(({type}) => type === 'render')).toHaveLength(2);
       });
 
+      // @reactVersion < 19
       it('should mark sync render with suspense that resolves', async () => {
         let resolveFn;
         let resolved = false;
@@ -1351,7 +1341,7 @@ describe('Timeline profiler', () => {
           return null;
         }
 
-        renderHelper(
+        legacyRender(
           <React.Suspense fallback={null}>
             <Example />
           </React.Suspense>,
@@ -1391,6 +1381,7 @@ describe('Timeline profiler', () => {
       });
 
       // @reactVersion >=18.2
+      // @reactVersion < 19
       it('should mark sync render with suspense that rejects', async () => {
         let rejectFn;
         let rejected = false;
@@ -1409,7 +1400,7 @@ describe('Timeline profiler', () => {
           return null;
         }
 
-        renderHelper(
+        legacyRender(
           <React.Suspense fallback={null}>
             <Example />
           </React.Suspense>,
@@ -1467,7 +1458,7 @@ describe('Timeline profiler', () => {
           return null;
         }
 
-        renderRootHelper(
+        modernRender(
           <React.Suspense fallback={null}>
             <Example />
           </React.Suspense>,
@@ -1525,7 +1516,7 @@ describe('Timeline profiler', () => {
           return null;
         }
 
-        renderRootHelper(
+        modernRender(
           <React.Suspense fallback={null}>
             <Example />
           </React.Suspense>,
@@ -1577,7 +1568,7 @@ describe('Timeline profiler', () => {
           }
         }
 
-        renderRootHelper(<Example />);
+        modernRender(<Example />);
 
         await waitForPaint(['mount', 'update']);
 
@@ -1636,7 +1627,7 @@ describe('Timeline profiler', () => {
           }
         }
 
-        renderRootHelper(<Example />);
+        modernRender(<Example />);
 
         await waitForPaint(['mount', 'force update']);
 
@@ -1694,7 +1685,7 @@ describe('Timeline profiler', () => {
           }
         }
 
-        renderRootHelper(<Example />);
+        modernRender(<Example />);
 
         let errorMessage;
         jest.spyOn(console, 'error').mockImplementation(message => {
@@ -1763,7 +1754,7 @@ describe('Timeline profiler', () => {
           }
         }
 
-        renderRootHelper(<Example />);
+        modernRender(<Example />);
 
         let errorMessage;
         jest.spyOn(console, 'error').mockImplementation(message => {
@@ -1828,7 +1819,7 @@ describe('Timeline profiler', () => {
           return didMount;
         }
 
-        renderRootHelper(<Example />);
+        modernRender(<Example />);
 
         await waitForAll(['mount', 'update']);
 
@@ -1892,7 +1883,7 @@ describe('Timeline profiler', () => {
           return didMount;
         }
 
-        renderRootHelper(<Example />);
+        modernRender(<Example />);
         await waitForAll(['mount', 'update']);
 
         const timelineData = stopProfilingAndGetTimelineData();
@@ -1954,7 +1945,7 @@ describe('Timeline profiler', () => {
           return didRender;
         }
 
-        renderRootHelper(<Example />);
+        modernRender(<Example />);
         await waitForAll(['mount', 'update']);
 
         const timelineData = stopProfilingAndGetTimelineData();
@@ -1992,6 +1983,7 @@ describe('Timeline profiler', () => {
         `);
       });
 
+      // @reactVersion < 19
       it('should mark sync render that throws', async () => {
         jest.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -2016,7 +2008,7 @@ describe('Timeline profiler', () => {
           throw Error('Expected error');
         }
 
-        renderHelper(
+        legacyRender(
           <ErrorBoundary>
             <ExampleThatThrows />
           </ErrorBoundary>,
@@ -2112,7 +2104,7 @@ describe('Timeline profiler', () => {
           throw 'Expected error';
         }
 
-        renderRootHelper(
+        modernRender(
           <ErrorBoundary>
             <ExampleThatThrows />
           </ErrorBoundary>,
@@ -2247,7 +2239,7 @@ describe('Timeline profiler', () => {
           return null;
         }
 
-        const unmount = renderRootHelper(<ComponentWithEffects />);
+        const unmount = modernRender(<ComponentWithEffects />);
 
         await waitForPaint(['layout 1 mount', 'layout 2 mount']);
 
@@ -2456,7 +2448,7 @@ describe('Timeline profiler', () => {
           return null;
         }
 
-        renderRootHelper(<CommponentWithChildren initialRender={false} />);
+        modernRender(<CommponentWithChildren initialRender={false} />);
 
         await waitForAll([
           'Render ComponentWithChildren',
@@ -2489,9 +2481,12 @@ describe('Timeline profiler', () => {
     });
 
     describe('when not profiling', () => {
+      const {render: legacyRender} = getLegacyRenderImplementation();
+
       // @reactVersion >=18.0
+      // @reactVersion < 19
       it('should not log any marks', () => {
-        renderHelper(<div />);
+        legacyRender(<div />);
 
         const timelineData = stopProfilingAndGetTimelineData();
         expect(timelineData).toBeNull();
