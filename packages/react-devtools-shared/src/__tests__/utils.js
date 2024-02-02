@@ -15,6 +15,7 @@ import type {FrontendBridge} from 'react-devtools-shared/src/bridge';
 import type Store from 'react-devtools-shared/src/devtools/store';
 import type {ProfilingDataFrontend} from 'react-devtools-shared/src/devtools/views/Profiler/types';
 import type {ElementType} from 'react-devtools-shared/src/frontend/types';
+import type {Node as ReactNode} from 'react';
 
 import {ReactVersion} from '../../../../ReactVersions';
 
@@ -98,6 +99,131 @@ export async function actAsync(
     });
   }
 }
+
+type RenderImplementation = {
+  render: (elements: ?ReactNode) => () => void,
+  unmount: () => void,
+  createContainer: () => void,
+  getContainer: () => ?HTMLElement,
+};
+
+export function getLegacyRenderImplementation(): RenderImplementation {
+  let ReactDOM;
+  let container;
+  let unmounted = false;
+
+  beforeEach(() => {
+    ReactDOM = require('react-dom');
+
+    createContainer();
+  });
+
+  afterEach(() => {
+    if (!unmounted) {
+      unmount();
+    }
+
+    ReactDOM = null;
+    container = null;
+  });
+
+  function render(elements) {
+    withErrorsOrWarningsIgnored(
+      ['ReactDOM.render is no longer supported in React 18'],
+      () => {
+        ReactDOM.render(elements, container);
+      },
+    );
+
+    return unmount;
+  }
+
+  function unmount() {
+    unmounted = true;
+
+    ReactDOM.unmountComponentAtNode(container);
+    document.body.removeChild(container);
+  }
+
+  function createContainer() {
+    unmounted = false;
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  }
+
+  function getContainer() {
+    return container;
+  }
+
+  return {
+    render,
+    unmount,
+    createContainer,
+    getContainer,
+  };
+}
+
+export function getModernRenderImplementation(): RenderImplementation {
+  let ReactDOMClient;
+  let container;
+  let root;
+  let unmounted = false;
+
+  beforeEach(() => {
+    ReactDOMClient = require('react-dom/client');
+
+    createContainer();
+  });
+
+  afterEach(() => {
+    if (!unmounted) {
+      unmount();
+    }
+
+    ReactDOMClient = null;
+    container = null;
+    root = null;
+  });
+
+  function render(elements) {
+    root.render(elements);
+
+    return unmount;
+  }
+
+  function unmount() {
+    unmounted = true;
+
+    root.unmount();
+    document.body.removeChild(container);
+  }
+
+  function createContainer() {
+    unmounted = false;
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+
+    root = ReactDOMClient.createRoot(container);
+  }
+
+  function getContainer() {
+    return container;
+  }
+
+  return {
+    render,
+    unmount,
+    createContainer,
+    getContainer,
+  };
+}
+
+export const getVersionedRenderImplementation: () => RenderImplementation =
+  semver.lt(requestedReactVersion, '18.0.0')
+    ? getLegacyRenderImplementation
+    : getModernRenderImplementation;
 
 export function beforeEachProfiling(): void {
   // Mock React's timing information so that test runs are predictable.
