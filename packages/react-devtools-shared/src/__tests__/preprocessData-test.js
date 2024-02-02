@@ -9,7 +9,7 @@
 
 'use strict';
 
-import {normalizeCodeLocInfo} from './utils';
+import {getLegacyRenderImplementation, normalizeCodeLocInfo} from './utils';
 
 describe('Timeline profiler', () => {
   let React;
@@ -106,6 +106,8 @@ describe('Timeline profiler', () => {
 
       setPerformanceMock(null);
     });
+
+    const {render: legacyRender} = getLegacyRenderImplementation();
 
     describe('getLanesFromTransportDecimalBitmask', () => {
       let getLanesFromTransportDecimalBitmask;
@@ -614,8 +616,9 @@ describe('Timeline profiler', () => {
         `);
       });
 
+      // @reactVersion < 19
       it('should process a sample legacy render sequence', async () => {
-        utils.legacyRender(<div />, document.createElement('div'));
+        legacyRender(<div />);
 
         const data = await preprocessData([
           ...createBoilerplateEntries(),
@@ -1132,9 +1135,9 @@ describe('Timeline profiler', () => {
       });
 
       // @reactVersion >= 18.0
+      // @reactVersion < 19
       it('should error if events and measures are incomplete', async () => {
-        const container = document.createElement('div');
-        utils.legacyRender(<div />, container);
+        legacyRender(<div />);
 
         const invalidMarks = clearedMarks.filter(
           mark => !mark.includes('render-stop'),
@@ -1150,9 +1153,9 @@ describe('Timeline profiler', () => {
       });
 
       // @reactVersion >= 18.0
+      // @reactVersion < 19
       it('should error if work is completed without being started', async () => {
-        const container = document.createElement('div');
-        utils.legacyRender(<div />, container);
+        legacyRender(<div />);
 
         const invalidMarks = clearedMarks.filter(
           mark => !mark.includes('render-start'),
@@ -1262,6 +1265,7 @@ describe('Timeline profiler', () => {
       describe('warnings', () => {
         describe('long event handlers', () => {
           // @reactVersion >= 18.0
+          // @reactVersion < 19
           it('should not warn when React scedules a (sync) update inside of a short event handler', async () => {
             function App() {
               return null;
@@ -1275,7 +1279,7 @@ describe('Timeline profiler', () => {
 
             clearPendingMarks();
 
-            utils.legacyRender(<App />, document.createElement('div'));
+            legacyRender(<App />);
 
             testMarks.push(...createUserTimingData(clearedMarks));
 
@@ -1285,6 +1289,7 @@ describe('Timeline profiler', () => {
           });
 
           // @reactVersion >= 18.0
+          // @reactVersion < 19
           it('should not warn about long events if the cause was non-React JavaScript', async () => {
             function App() {
               return null;
@@ -1300,7 +1305,7 @@ describe('Timeline profiler', () => {
 
             clearPendingMarks();
 
-            utils.legacyRender(<App />, document.createElement('div'));
+            legacyRender(<App />);
 
             testMarks.push(...createUserTimingData(clearedMarks));
 
@@ -1310,6 +1315,7 @@ describe('Timeline profiler', () => {
           });
 
           // @reactVersion >= 18.0
+          // @reactVersion < 19
           it('should warn when React scedules a long (sync) update inside of an event', async () => {
             function App() {
               return null;
@@ -1323,7 +1329,7 @@ describe('Timeline profiler', () => {
 
             clearPendingMarks();
 
-            utils.legacyRender(<App />, document.createElement('div'));
+            legacyRender(<App />);
 
             clearedMarks.forEach(markName => {
               if (markName === '--render-stop') {
@@ -1929,8 +1935,11 @@ describe('Timeline profiler', () => {
       global.IS_REACT_ACT_ENVIRONMENT = true;
     });
 
+    const {render: legacyRender} = getLegacyRenderImplementation();
+
+    // @reactVersion < 19
     it('should process a sample legacy render sequence', async () => {
-      utils.legacyRender(<div />, document.createElement('div'));
+      legacyRender(<div />);
       utils.act(() => store.profilerStore.stopProfiling());
 
       const data = store.profilerStore.profilingData?.timelineData;
