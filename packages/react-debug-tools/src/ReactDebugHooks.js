@@ -7,11 +7,7 @@
  * @flow
  */
 
-import type {
-  ReactContext,
-  ReactProviderType,
-  StartTransitionOptions,
-} from 'shared/ReactTypes';
+import type {ReactContext, StartTransitionOptions} from 'shared/ReactTypes';
 import type {
   Fiber,
   Dispatcher as DispatcherType,
@@ -771,8 +767,7 @@ function setupContexts(contextMap: Map<ReactContext<any>, any>, fiber: Fiber) {
   let current: null | Fiber = fiber;
   while (current) {
     if (current.tag === ContextProvider) {
-      const providerType: ReactProviderType<any> = current.type;
-      const context: ReactContext<any> = providerType._context;
+      const context: ReactContext<any> = current.type;
       if (!contextMap.has(context)) {
         // Store the current value that we're going to restore later.
         contextMap.set(context, context._currentValue);
