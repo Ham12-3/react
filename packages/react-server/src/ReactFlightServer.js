@@ -15,7 +15,6 @@ import {
   enableBinaryFlight,
   enablePostpone,
   enableTaint,
-  enableServerContext,
 } from 'shared/ReactFeatureFlags';
 
 import {
@@ -45,17 +44,13 @@ import type {
   HintCode,
   HintModel,
 } from './ReactFlightServerConfig';
-import type {ContextSnapshot} from './ReactFlightNewContext';
 import type {ThenableState} from './ReactFlightThenable';
 import type {
-  ReactProviderType,
-  ServerContextJSONValue,
   Wakeable,
   Thenable,
   PendingThenable,
   FulfilledThenable,
   RejectedThenable,
-  ReactServerContext,
 } from 'shared/ReactTypes';
 import type {LazyComponent} from 'react/src/ReactLazy';
 
@@ -81,13 +76,6 @@ import {
   resetHooksForRequest,
 } from './ReactFlightHooks';
 import {DefaultCacheDispatcher} from './flight/ReactFlightServerCache';
-import {
-  pushProvider,
-  popProvider,
-  switchContext,
-  getActiveContext,
-  rootContextSnapshot,
-} from './ReactFlightNewContext';
 
 import {
   getIteratorFn,
@@ -97,7 +85,6 @@ import {
   REACT_LAZY_TYPE,
   REACT_MEMO_TYPE,
   REACT_POSTPONE_TYPE,
-  REACT_PROVIDER_TYPE,
 } from 'shared/ReactSymbols';
 
 import {
@@ -109,7 +96,6 @@ import {
   objectName,
 } from 'shared/ReactSerializationErrors';
 
-import {getOrCreateServerContext} from 'shared/ReactServerContextRegistry';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import ReactServerSharedInternals from './ReactServerSharedInternals';
 import isArray from 'shared/isArray';
@@ -152,7 +138,6 @@ export type ReactClientValue =
   // subtype, so the receiver can only accept once of these.
   | React$Element<string>
   | React$Element<ClientReference<any> & any>
-  | ReactServerContext<any>
   | string
   | boolean
   | number
@@ -181,7 +166,6 @@ type Task = {
   model: ReactClientValue,
   ping: () => void,
   toJSON: (key: string, value: ReactClientValue) => ReactJSONValue,
-  context: ContextSnapshot,
   thenableState: ThenableState | null,
 };
 
@@ -206,7 +190,6 @@ export type Request = {
   writtenSymbols: Map<symbol, number>,
   writtenClientReferences: Map<ClientReferenceKey, number>,
   writtenServerReferences: Map<ServerReference<any>, number>,
-  writtenProviders: Map<string, number>,
   writtenObjects: WeakMap<Reference, number>, // -1 means "seen" but not outlined.
   identifierPrefix: string,
   identifierCount: number,
@@ -263,7 +246,6 @@ export function createRequest(
   model: ReactClientValue,
   bundlerConfig: ClientManifest,
   onError: void | ((error: mixed) => ?string),
-  context?: Array<[string, ServerContextJSONValue]>,
   identifierPrefix?: string,
   onPostpone: void | ((reason: string) => void),
 ): Request {
@@ -304,7 +286,6 @@ export function createRequest(
     writtenSymbols: new Map(),
     writtenClientReferences: new Map(),
     writtenServerReferences: new Map(),
-    writtenProviders: new Map(),
     writtenObjects: new WeakMap(),
     identifierPrefix: identifierPrefix || '',
     identifierCount: 1,
@@ -313,8 +294,7 @@ export function createRequest(
     onPostpone: onPostpone === undefined ? defaultPostponeHandler : onPostpone,
   };
   request.pendingChunks++;
-  const rootContext = createRootContext(context);
-  const rootTask = createTask(request, model, rootContext, abortSet);
+  const rootTask = createTask(request, model, abortSet);
   pingedTasks.push(rootTask);
   return request;
 }
@@ -330,22 +310,9 @@ export function resolveRequest(): null | Request {
   return null;
 }
 
-function createRootContext(
-  reqContext?: Array<[string, ServerContextJSONValue]>,
-) {
-  return importServerContexts(reqContext);
-}
-
-const POP = {};
-
 function serializeThenable(request: Request, thenable: Thenable<any>): number {
   request.pendingChunks++;
-  const newTask = createTask(
-    request,
-    null,
-    getActiveContext(),
-    request.abortableTasks,
-  );
+  const newTask = createTask(request, null, request.abortableTasks);
 
   switch (thenable.status) {
     case 'fulfilled': {
@@ -601,33 +568,6 @@ function renderElement(
       case REACT_MEMO_TYPE: {
         return renderElement(request, task, type.type, key, ref, props);
       }
-      case REACT_PROVIDER_TYPE: {
-        if (enableServerContext) {
-          task.context = pushProvider(type._context, props.value);
-          if (__DEV__) {
-            const extraKeys = Object.keys(props).filter(value => {
-              if (value === 'children' || value === 'value') {
-                return false;
-              }
-              return true;
-            });
-            if (extraKeys.length !== 0) {
-              console.error(
-                'ServerContext can only have a value prop and children. Found: %s',
-                JSON.stringify(extraKeys),
-              );
-            }
-          }
-          return [
-            REACT_ELEMENT_TYPE,
-            type,
-            key,
-            // Rely on __popProvider being serialized last to pop the provider.
-            {value: props.value, children: props.children, __pop: POP},
-          ];
-        }
-        // Fallthrough
-      }
     }
   }
   throw new Error(
@@ -647,7 +587,6 @@ function pingTask(request: Request, task: Task): void {
 function createTask(
   request: Request,
   model: ReactClientValue,
-  context: ContextSnapshot,
   abortSet: Set<Task>,
 ): Task {
   const id = request.nextChunkId++;
@@ -659,7 +598,6 @@ function createTask(
     id,
     status: PENDING,
     model,
-    context,
     ping: () => pingTask(request, task),
     toJSON: function (
       this:
@@ -703,26 +641,6 @@ function createTask(
             );
           }
         }
-
-        if (
-          enableServerContext &&
-          parent[0] === REACT_ELEMENT_TYPE &&
-          parent[1] &&
-          (parent[1]: any).$$typeof === REACT_PROVIDER_TYPE &&
-          parentPropertyName === '3'
-        ) {
-          insideContextProps = value;
-        } else if (
-          insideContextProps === parent &&
-          parentPropertyName === 'value'
-        ) {
-          isInsideContextValue = true;
-        } else if (
-          insideContextProps === parent &&
-          parentPropertyName === 'children'
-        ) {
-          isInsideContextValue = false;
-        }
       }
       return renderModel(request, task, parent, parentPropertyName, value);
     },
@@ -750,10 +668,6 @@ function serializeServerReferenceID(id: number): string {
 
 function serializeSymbolReference(name: string): string {
   return '$S' + name;
-}
-
-function serializeProviderReference(name: string): string {
-  return '$P' + name;
 }
 
 function serializeNumber(number: number): string | number {
@@ -852,12 +766,7 @@ function serializeClientReference(
 
 function outlineModel(request: Request, value: ReactClientValue): number {
   request.pendingChunks++;
-  const newTask = createTask(
-    request,
-    value,
-    getActiveContext(),
-    request.abortableTasks,
-  );
+  const newTask = createTask(request, value, request.abortableTasks);
   retryTask(request, newTask);
   return newTask.id;
 }
@@ -975,8 +884,6 @@ function escapeStringValue(value: string): string {
   }
 }
 
-let insideContextProps = null;
-let isInsideContextValue = false;
 let modelRoot: null | ReactClientValue = false;
 
 function renderModel(
@@ -1013,12 +920,7 @@ function renderModel(
       if (typeof x.then === 'function') {
         // Something suspended, we'll need to create a new task and resolve it later.
         request.pendingChunks++;
-        const newTask = createTask(
-          request,
-          task.model,
-          getActiveContext(),
-          request.abortableTasks,
-        );
+        const newTask = createTask(request, task.model, request.abortableTasks);
         const ping = newTask.ping;
         (x: any).then(ping, ping);
         newTask.thenableState = getThenableStateAfterSuspending();
@@ -1081,11 +983,6 @@ function renderModelDestructive(
   if (typeof value === 'object') {
     switch ((value: any).$$typeof) {
       case REACT_ELEMENT_TYPE: {
-        if (__DEV__) {
-          if (enableServerContext && isInsideContextValue) {
-            console.error('React elements are not allowed in ServerContext');
-          }
-        }
         const writtenObjects = request.writtenObjects;
         const existingId = writtenObjects.get(value);
         if (existingId !== undefined) {
@@ -1169,29 +1066,6 @@ function renderModelDestructive(
       const promiseId = serializeThenable(request, (value: any));
       writtenObjects.set(value, promiseId);
       return serializePromiseID(promiseId);
-    }
-
-    if (enableServerContext) {
-      if ((value: any).$$typeof === REACT_PROVIDER_TYPE) {
-        const providerKey = ((value: any): ReactProviderType<any>)._context
-          ._globalName;
-        const writtenProviders = request.writtenProviders;
-        let providerId = writtenProviders.get(providerKey);
-        if (providerId === undefined) {
-          request.pendingChunks++;
-          providerId = request.nextChunkId++;
-          writtenProviders.set(providerKey, providerId);
-          emitProviderChunk(request, providerId, providerKey);
-        }
-        return serializeByValueID(providerId);
-      } else if (value === POP) {
-        task.context = popProvider();
-        if (__DEV__) {
-          insideContextProps = null;
-          isInsideContextValue = false;
-        }
-        return (undefined: any);
-      }
     }
 
     if (existingId !== undefined) {
@@ -1558,16 +1432,6 @@ function emitSymbolChunk(request: Request, id: number, name: string): void {
   request.completedImportChunks.push(processedChunk);
 }
 
-function emitProviderChunk(
-  request: Request,
-  id: number,
-  contextName: string,
-): void {
-  const contextReference = serializeProviderReference(contextName);
-  const processedChunk = encodeReferenceChunk(request, id, contextReference);
-  request.completedRegularChunks.push(processedChunk);
-}
-
 function emitModelChunk(request: Request, id: number, json: string): void {
   const row = id.toString(16) + ':' + json + '\n';
   const processedChunk = stringToChunk(row);
@@ -1582,7 +1446,6 @@ function retryTask(request: Request, task: Task): void {
     return;
   }
 
-  switchContext(task.context);
   try {
     // Track the root so we know that we have to emit this object even though it
     // already has an ID. This is needed because we might see this object twice
@@ -1854,22 +1717,4 @@ export function abort(request: Request, reason: mixed): void {
     logRecoverableError(request, error);
     fatalError(request, error);
   }
-}
-
-function importServerContexts(
-  contexts?: Array<[string, ServerContextJSONValue]>,
-) {
-  if (enableServerContext && contexts) {
-    const prevContext = getActiveContext();
-    switchContext(rootContextSnapshot);
-    for (let i = 0; i < contexts.length; i++) {
-      const [name, value] = contexts[i];
-      const context = getOrCreateServerContext(name);
-      pushProvider(context, value);
-    }
-    const importedContext = getActiveContext();
-    switchContext(prevContext);
-    return importedContext;
-  }
-  return rootContextSnapshot;
 }
